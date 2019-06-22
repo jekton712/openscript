@@ -30,7 +30,8 @@ function getcomment () {
       var set3 = "\" vpos=\"";
       var set4 = "\" no=\"";
       var set5 = "\">";
-      var set6 = "</chat>";
+      var set6 = "</chat>";        
+      var n    = 0; //no列用
       
       // 配列宣言、ここに各行を格納していく
       var arrData = [];
@@ -62,7 +63,7 @@ function getcomment () {
             var vpos          = (unixpostDate - unixstartTime) * 100 + rand;  //vpos算出
             var content       = jsonData["data"]["items"][j]["message"];      //コメント内容
             var convcontent   = content.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('\"').join('&quot;').split('\'').join('&#039;'); //特殊文字置換
-            var no            = j + 1;
+            var no            = n + j + 1;
             
             var setdata       = set1 + userId + set2 + unixpostDate + set3 + vpos + set4 + no + set5 + convcontent + set6; //xmlのコメント行形式に変換
             arrData.push([setdata]); //配列にコメント行挿入
@@ -70,6 +71,7 @@ function getcomment () {
             if(j == 999){
               // 1000コメ目の投稿日時に1秒足した日時を新しくfrom_dtにセット。(unixpostDateに+1して再変換)          
               var from_dt = Utilities.formatDate(new Date((unixpostDate + 1)*1000), 'JST' ,'yyyy-MM-dd+HH:mm:ss').replace(':', '%3A').replace(':', '%3A');
+              var n       = n + 1000;
               
             }
           } else { //最後のコメントまで取得したらjループ終了させる
