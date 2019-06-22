@@ -1,0 +1,135 @@
+/* 
+OPENREC.tvの指定した放送IDのコメントを取得する。
+コメント行をシートに書き出すようにも切り替え可能(初版の名残)
+*/
+
+
+var idsheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('放送ID入力');
+
+function getcomment () {
+  
+  idsheet.getRange("C:C").clearContent(); //C列をクリア
+  var Idlist  = idsheet.getRange("B:B").getValues(); //放送IDを全て取得 
+  var lastrow = Idlist.filter(String).length; //放送IDの個数を取得
+  
+  for(var i = 0; i < Idlist.filter(String).length; i++) { //放送IDを一つずつ処理
+    if(Idlist[i]){ //データがあるなら続行
+      
+      // 文字列IDから数値IDと放送開始日時を取得
+      var liveId    = idsheet.getRange(i + 1, 2).getValues(); //入力シートから放送ID(文字列)取得
+      var url       = 'https://www.openrec.tv/live/' + liveId ;
+      var html      = UrlFetchApp.fetch(url.slice(0, 39)).getContentText(); //何故か放送IDがカンマ区切りで重複するので先頭から39文字でカット
+      var movieId   = Parser.data(html).from('name="twitter:app:url:iphone" content="jp.co.cyber-z.openrec://live?id=').to('&amp;amp;').iterate(); //数値ID
+      var startTime = Parser.data(html).from('itemprop="uploadDate" content="').to('"').iterate(); //放送開始時刻
+      var from_dt_1 = Utilities.formatDate(new Date(startTime), 'JST' ,'yyyy-MM-dd+HH:mm:ss').split(':').join('%3A');; //from_dtの初期値
+      var to_dt     = "2030-12-31+23%3A59%3A59" //固定値
+      
+      // 各書式設定
+      var set1 = "<chat user_id=\"";
+      var set2 = "\" date=\"";
+      var set3 = "\" vpos=\"";
+      var set4 = "\" no=\"";
+      var set5 = "\">";
+      var set6 = "</chat>";
+      
+      // 配列宣言、ここに各行を格納していく
+      var arrData = [];
+      arrData.push(["<?xml version=\'1.0\' encoding=\'UTF-8\'?>"]);
+      arrData.push(["<packet>"]);
+      /*
+      スプレッドシートに書き出したい場合は配列宣言を下記と入れ替える
+      var gcsheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('commentList');
+      var arrData = gcsheet.getDataRange().getValues(); 
+      */
+      
+      for(var from_dt = from_dt_1; from_dt != "fin" ; ){ //from_dtをループさせる。from_dt=finで終了。
+        
+        // jsonデータ取得
+        var url      = 'https://www.openrec.tv/viewapp/api/v3/chat/list?movie_id=' + movieId + '&from_dt=' + from_dt + '&to_dt=' + to_dt + '&Uuid=C361AEA7-D37C-BA64-1988-F8CF7F3A7D5D&Token=3c049aedf3447da3d325a219f2bebed232c65e99&Random=CLRGEFANJPFGOMSDLERV' ;
+        var json     = UrlFetchApp.fetch(url).getContentText();
+        var jsonData = JSON.parse(json);
+        
+        // コメントデータ取得
+        for(var j = 0; j <=999; j++){ //全コメントデータループ。
+          if(jsonData["data"]["items"][j]){ //データがあるなら続行
+            
+            var userId        = jsonData["data"]["items"][j]["user_key"];     //ユーザーID(名前)
+            var postDate      = jsonData["data"]["items"][j]["cre_dt"];       //コメント投稿日時("yyyy-MM-dd HH:mm:ss"の文字列形式)
+            var convpostDate  = postDate.split('-').join('/');                //置き換え
+            var unixpostDate  = parseInt(new Date(convpostDate) / 1000);      //投稿日時unix変換
+            var unixstartTime = parseInt(new Date(startTime) / 1000);         //放送開始日時unix変換
+            var rand          = Math.floor(Math.random()*100);                //0~99の乱数生成
+            var vpos          = (unixpostDate - unixstartTime) * 100 + rand;  //vpos算出
+            var content       = jsonData["data"]["items"][j]["message"];      //コメント内容
+            var convcontent   = content.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('\"').join('&quot;').split('\'').join('&#039;'); //特殊文字置換
+            var no            = j + 1;
+            
+            var setdata       = set1 + userId + set2 + unixpostDate + set3 + vpos + set4 + no + set5 + convcontent + set6; //xmlのコメント行形式に変換
+            arrData.push([setdata]); //配列にコメント行挿入
+            
+            if(j == 999){
+              // 1000コメ目の投稿日時に1秒足した日時を新しくfrom_dtにセット。(unixpostDateに+1して再変換)          
+              var from_dt = Utilities.formatDate(new Date((unixpostDate + 1)*1000), 'JST' ,'yyyy-MM-dd+HH:mm:ss').replace(':', '%3A').replace(':', '%3A');
+              
+            }
+          } else { //最後のコメントまで取得したらjループ終了させる
+            var from_dt = "fin"; //from_dtループを終わらせる
+            break; 
+          }
+        }
+      }
+      
+      arrData.push(["</packet>"]); //配列の最終行に挿入
+      
+      /*
+      スプレッドシートに書き出したい場合はここを有効にする
+      
+      var rows = arrData.length;
+      var cols = arrData[0].length;
+      gcsheet.getRange(1,1,rows,cols).setValues(arrData); //完成した配列をシートへ書き出し
+      
+      */
+      
+      // ドライブにxmlファイル書き出し
+      // 出力ファイル名を変えたい場合はここを変更する
+      var filetime = Utilities.formatDate(new Date(startTime), 'JST' ,'yyyyMMdd_HHmmss_'); //出力ファイル名(日時)
+      var filename = filetime + liveId + "_comment.xml"; //出力ファイル名
+      var xmlData  = loadData(arrData);
+      writeDrive(xmlData, filename);
+      
+      idsheet.getRange(i + 1, 3).setValue("Done!"); //実行完了表示
+      
+    }
+  }
+}
+
+// シートの全データ取得
+function loadData(arrData) {
+  var data  = arrData;
+  var xml   = '';
+  for(var i = 0; i < data.length; i++) {
+    xml += data[i].join(',') + "\r\n";
+  }
+  Logger.log(xml)
+  
+  return xml;
+}
+
+// ドライブにxmlファイル書き出し
+function writeDrive(xml, filename) {
+  var drive       = DriveApp.getFolderById(idsheet.getRange(4, 4).getValues()); //出力先フォルダ取得
+  var fileName    = filename ;
+  var contentType = 'text/xml';
+  var charset     = 'utf-8';
+  var blob        = Utilities.newBlob('', contentType, fileName).setDataFromString(xml, charset);
+  drive.createFile(blob);
+}
+
+// ドライブリンク取得用
+function showUrl(){
+  var id  = idsheet.getRange(4, 4).getValues(); //フォルダID取得
+  var url = 'https://drive.google.com/drive/folders/' + id ;
+  
+  Browser.msgBox(url);
+  
+}
